@@ -2,7 +2,7 @@
     <arg name="input_topic" default="/livox/lidar" />
     <arg name="output_topic" default="/livox/lidar_inv" />
     <arg name="input_frame" default="livox_frame" />
-    <arg name="output_frame" default="livox_frame_inv" >
+    <arg name="output_frame" default="livox_frame_inv" />
 
     <node name="pointcloud_transformer_node" pkg="lidar_transform" type="lidar_transform_node" output="screen">
         <param name="input_topic" value="$(arg input_topic)" />
