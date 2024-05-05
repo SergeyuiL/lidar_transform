@@ -1,24 +1,22 @@
 <launch>
     <param name="use_sim_time" value="true" />
-    <arg name="play_bagfile" default="$(find sim2real)/rosbag/0424/remote_control_image.bag"/>
-    <arg name="save_bagfile" default="$(find sim2real)/rosbag/0424/move_localization.bag"/>
-    <arg name="record"  default="false"/>
-    <arg name="rviz"   default="true"/>
+    <arg name="play_bagfile" default="" />
+    <arg name="save_bagfile" default="" />
+    <arg name="record"  default="false" />
+    <arg name="rviz"   default="true" />
 
     <!-- rosbag play -->
     <node name="player" pkg="rosbag" type="play" output="screen" args="--clock --rate=1.0 $(arg play_bagfile)" />
 
-    <node name="pointcloud_transformer_node" pkg="lidar_transform" type="lidar_transform_node" output="screen">
-        <param name="input_topic" value="/livox/lidar" />
-        <param name="output_topic" value="/livox/lidar_inv" />
-        <param name="input_frame" value="livox_frame" />
-        <param name="output_frame" value="livox_frame_inv" />
-    </node>
+    <node name="pointcloud_transformer_node" pkg="lidar_transform" type="lidar_transform_node" output="screen" />
 
     <!-- tf -->
-    <include file="$(find sim2real)/launch/robot_state_publisher.launch">
-        <arg name="robot_description_path" value="$(find sim2real)/urdf/AIRBOT_V3_v2-3.urdf"/>
-    </include>
+    <group ns="airbot">
+        <param name="robot_description" textfile="$(find icra2024_sim2real_axs)/urdf/AIRBOT_V3_v2-3.urdf"/>
+        <node name="publish_robot_state" pkg="robot_state_publisher" type="robot_state_publisher">
+        <param name="publish_frequency" type="double" value="50"/>
+        </node>
+    </group>
 
     <!-- record rosbag -->
     <node if="$(arg record)" name="rosbag_record" pkg="rosbag" type="record" args="--lz4 --repeat-latched -a -O $(arg save_bagfile)" output="screen" />

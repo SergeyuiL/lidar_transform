@@ -1,53 +1,58 @@
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
-#include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_sensor_msgs/tf2_sensor_msgs.h>
-#include <geometry_msgs/TransformStamped.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-
+#include <pcl_ros/transforms.h>
+#include <pcl/filters/crop_box.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 class PointCloudTransformer {
 public:
     PointCloudTransformer() {
-        // Initialize ROS node handle
         ros::NodeHandle nh;
-        ros::NodeHandle private_nh("~");
-        // Get parameters from the parameter server or use defaults
-        private_nh.param("input_topic", input_topic_, std::string("/livox/lidar"));
-        private_nh.param("output_topic", output_topic_, std::string("/livox/lidar_inv"));
-        private_nh.param("input_frame", input_frame_, std::string("livox_frame"));
-        private_nh.param("output_frame", output_frame_, std::string("livox_frame_inv"));
-        // Publisher for the transformed PointCloud
-        pub_ = nh.advertise<sensor_msgs::PointCloud2>(output_topic_, 10);
-        // Subscriber to the original PointCloud
-        sub_ = nh.subscribe(input_topic_, 10, &PointCloudTransformer::callback, this);
-        // Initialize transform
-        transform_.header.frame_id = input_frame_;
-        transform_.child_frame_id = output_frame_;
-        transform_.transform.rotation = tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), M_PI)); // 180 degrees around Z-axis
-    }
 
-    void callback(const sensor_msgs::PointCloud2ConstPtr& msg) {
-        sensor_msgs::PointCloud2 out_msg;
-        // Set the transform timestamp to the message timestamp
-        transform_.header.stamp = msg->header.stamp;
-        // Transform the PointCloud
-        tf2::doTransform(*msg, out_msg, transform_);
-        // Set the new frame ID
-        out_msg.header.frame_id = output_frame_;
-        // Publish the transformed PointCloud
-        pub_.publish(out_msg);
-        // Optionally, broadcast the new frame
-        static tf2_ros::TransformBroadcaster br;
-        br.sendTransform(transform_);
+        if (ros::param::get("~frame_override", frame_override)) {
+            ROS_INFO("Overriding frame_id to %s", frame_override.c_str());
+        } else {
+            ROS_INFO("Preserving input frame_id");
+        }
+
+        pc_pub = nh.advertise<sensor_msgs::PointCloud2>("livox/lidar/transformed", 10);
+        pc_sub = nh.subscribe("livox/lidar", 10, &PointCloudTransformer::pc_callback, this);
     }
 
 private:
-    ros::Publisher pub_;
-    ros::Subscriber sub_;
-    geometry_msgs::TransformStamped transform_;
-    std::string input_topic_, output_topic_, input_frame_, output_frame_;
+    std::string frame_override;
+    ros::Publisher pc_pub;
+    ros::Subscriber pc_sub;
+
+    void pc_callback(const sensor_msgs::PointCloud2ConstPtr& msg) {
+        // Rotate the point cloud along the z-axis by 180 degrees
+        Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+        transform(0, 0) = -1.0;
+        transform(1, 1) = -1.0;
+        sensor_msgs::PointCloud2 msg_rotated;
+        pcl_ros::transformPointCloud(transform, *msg, msg_rotated);
+
+        // Remove points within box x = -1.0~0.0, y = -0.4~+0.4, z = -inf~+inf
+        pcl::PCLPointCloud2::Ptr pc_in = boost::make_shared<pcl::PCLPointCloud2>();
+        pcl_conversions::toPCL(msg_rotated, *pc_in);
+        pcl::CropBox<pcl::PCLPointCloud2> crop_filter;
+        crop_filter.setNegative(true);
+        crop_filter.setMin({-1.0, -0.4, -1.0, 0.0});
+        crop_filter.setMax({0.0, 0.4, 1.0, 0.0});
+        crop_filter.setInputCloud(pc_in);
+        pcl::PCLPointCloud2 pc_out;
+        crop_filter.filter(pc_out);
+
+        sensor_msgs::PointCloud2 transformed_pc;
+        pcl_conversions::fromPCL(pc_out, transformed_pc);
+        transformed_pc.header = msg->header;
+
+        if (!frame_override.empty()) {
+            transformed_pc.header.frame_id = frame_override;
+        }
+
+        pc_pub.publish(transformed_pc);
+    }
 };
 
 int main(int argc, char** argv) {
